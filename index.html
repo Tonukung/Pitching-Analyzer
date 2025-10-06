@@ -3,9 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World</title>
-</head>
+    <title>Pitching Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <link rel="stylesheet" href="style.css">
+</head> 
 <body>
-    <h1>Hello World</h1>
+    <div class="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div class="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+            <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Pitching Checker</h2>
+            <form>
+                <div class="mb-4">
+                    <label for="audio-upload" class="block text-gray-700 text-sm font-semibold mb-2">กรุณาอัพโหลดไฟล์เสียง</label>
+                    <input type="file" id="audio-upload" accept=".mp3,.wav,.ogg" class="block w-full text-sm text-gray-500 hover:duration-300
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-violet-50 file:text-violet-700
+                    hover:file:bg-violet-100" required>
+                </div>
+                <div class="text-center">
+                    <button class="bg-blue-500 hover:bg-blue-700 duration-300 text-white font-bold py-2 px-4 rounded-full" onclick="alert('Feature coming soon!')">
+                        Analyze Pitch
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="https://cdn.tailwindcss.com"></script>
 </body>
 </html>
