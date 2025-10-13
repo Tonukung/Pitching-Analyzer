@@ -1,0 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai+Looped:wght@100..900&display=swap');
+
+body {
+    font-family: "Noto Sans Thai Looped", sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.score-display {
+    font-size: 4rem; /* Larger font for the score */
+    line-height: 1;
+}
