@@ -2,34 +2,58 @@
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
+from fastapi.templating import Jinja2Templates
+from starlette.responses import JSONResponse
+from datetime import datetime
+from fastapi import Request
 import shutil
 import os
+
+app = FastAPI()
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI()
-
-# Mount static files (CSS, JS, images, etc.)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="file")
 
 @app.get("/")
-async def read_index():
-    """Index"""
-    return FileResponse('index.html')
+async def index(request: Request):
+    """index"""
+    return templates.TemplateResponse(
+        name="index.html",
+        context={"request": request}
+    )
+
+@app.get("/result.html")
+async def result(request: Request, filename: str | None = None):
+    """Result"""
+    current_date = datetime.now().strftime("%d %B %Y")
+    display_filename = filename if filename else "pitching_file.mp3"
+
+    context_data = {
+        "request": request,
+        "filename": display_filename,
+        "analysis_date": current_date,
+        "score": "ERROR"
+    }
+    return templates.TemplateResponse(
+        name="result.html",
+        context=context_data
+    )
 
 @app.post("/uploadfile/")
 async def create_upload_file(file: UploadFile = File(...)):
-    # You can access file details like filename and content type
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
-    
-    # Save the file to disk asynchronously
-    try:
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    finally:
-        # It's a good practice to close the UploadFile object
-        await file.close()
+    """Upload file"""
+    sanitized_filename = file.filename.replace(" ", "_")
+    file_path = os.path.join(UPLOAD_DIR, sanitized_filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    print(f"File '{file.filename}' Upload Complete as '{sanitized_filename}'")
 
-    return {"filename": file.filename, "message": "File uploaded successfully"}
+    redirect_url = f"/result.html?filename={sanitized_filename}"
+    return JSONResponse(content={
+        "message": "Upload successful", 
+        "filename": file.filename, 
+        "redirect": redirect_url
+    })

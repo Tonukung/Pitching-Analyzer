@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitching Analyzer | Analyze Result</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css">
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body class="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-lg">
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-8 flex items-center justify-center">
+            ผลการวิเคราะห์การ Pitching
+        </h2>
+        
+        <div class="bg-gray-50 p-3 rounded-lg text-sm text-gray-600 mb-6 border border-gray-200">
+            <p><span class="font-semibold">ไฟล์:</span> {{ filename }}</p>
+            <p><span class="font-semibold">วันที่วิเคราะห์:</span> {{ analysis_date }}</p>
+        </div>
+
+        <div class="bg-indigo-600 text-white p-6 rounded-xl mb-8 shadow-lg">
+            <p class="font-semibold text-lg uppercase tracking-wider mb-2">คะแนนความเข้าใจในการสื่อสาร</p>
+            <div class="flex items-end justify-between">
+                <span class="score-display font-extrabold">{{ score }}</span>
+                <span class="text-xl font-bold">/ 100</span>
+            </div>
+            <p class="text-indigo-200 text-sm mt-2">Communication Clarity Score</p>
+        </div>
+
+        <h3 class="text-xl font-bold text-gray-800 mb-3 border-b pb-2">ข้อเสนอแนะ</h3>
+        
+        <div class="mb-6">
+            <p class="text-gray-700 font-medium mb-2">จุดแข็ง:</p>
+            <div class="bg-green-50 p-4 rounded-lg text-green-800 border border-green-200">
+                <ul class="list-disc list-inside space-y-1">
+                    <li><strong class="font-semibold">ความชัดเจน:</strong> การออกเสียงชัดเจนและมีจังหวะการพูดที่ดี ทำให้ผู้ฟังติดตามได้ง่าย</li>
+                    <li><strong class="font-semibold">การเน้นคำ:</strong> คุณสามารถเน้นคำสำคัญได้อย่างถูกต้อง ทำให้ใจความสำคัญของเนื้อหามีความโดดเด่น</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="mb-6">
+            <p class="text-gray-700 font-medium mb-2">สิ่งที่ควรปรับปรุง:</p>
+            <div class="bg-yellow-50 p-4 rounded-lg text-yellow-800 border border-yellow-200">
+                <ul class="list-disc list-inside space-y-1">
+                    <li><strong class="font-semibold">ความเร็ว:</strong> ในช่วงท้ายของการนำเสนอ ความเร็วในการพูดเพิ่มขึ้นเล็กน้อย ควรพยายามรักษาจังหวะให้คงที่</li>
+                    <li><strong class="font-semibold">โทนเสียง:</strong> ควรเพิ่มความหลากหลายของโทนเสียง (Pitch Variation) อีกเล็กน้อย เพื่อให้การนำเสนอมีความน่าสนใจยิ่งขึ้น</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="text-center mt-6">
+            <a href="../" class="bg-indigo-500 hover:bg-indigo-700 transition duration-300 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:shadow-xl inline-flex items-center">
+                วิเคราะห์ไฟล์เสียงใหม่
+            </a>
+        </div>
+    </div>
+</body>
+</html>
