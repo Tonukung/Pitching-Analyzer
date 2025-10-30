@@ -71,7 +71,6 @@ async def index(request: Request):
         context={"request": request}
     )
 
-
 @app.get("/result.html")
 async def result(request: Request, filename: Optional[str] = None):
     """Result - now fetches analysis from external API and passes it into template"""
