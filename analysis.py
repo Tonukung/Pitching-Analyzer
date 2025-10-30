@@ -1,7 +1,7 @@
-!pip install faster-whisper librosa groq
+# !pip install faster-whisper librosa groq
 
 import os
-from google.colab import userdata
+# from google.colab import userdata
 
 os.environ["GROQ_API_KEY"] = userdata.get('GROQ_API_KEY')
 
