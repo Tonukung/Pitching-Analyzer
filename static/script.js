@@ -1,76 +1,63 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const form = document.getElementById('upload-form');
-    const body = document.body;
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("upload-form");
 
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const formData = new FormData(form);
-        body.style.cursor = 'wait';
-        Swal.fire({
-            title: 'กำลังวิเคราะห์ข้อมูล...',
-            html: 'กรุณารอสักครู่ ระบบกำลังประมวลผลไฟล์เสียงของคุณ',
-            allowOutsideClick: false,
-            allowEscapeKey: false,
-            showConfirmButton: false, 
-            width: 600,
-            padding: "3em",
-            color: "#716add",
-            backdrop: `
-                rgba(0,0,123,0.4)
-                url("https://i.pinimg.com/originals/ed/35/f8/ed35f861be81be2548e514085fb19385.gif")
-                center top
-                no-repeat
-            `
-        });
-        try {
-            await new Promise(resolve => setTimeout(resolve, 1000)); // wait respond API Form [ AI:bell ]
-            const response = await fetch('/uploadfile/', {
-                method: 'POST',
-                body: formData
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const result = await response.json(); 
-            
-            Swal.close(); 
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
 
-            let timerInterval;
-            Swal.fire({
-            title: "สำเร็จ!",
-            html: "ไฟล์ได้รับการอัปโหลดและวิเคราะห์แล้ว",
-            icon: 'success',
-            timer: 2000,
-            didOpen: () => {
-                timerInterval = setInterval(() => {
-                }, 500);
-            },
-            willClose: () => {
-                clearInterval(timerInterval);
-            }
-            }).then(() => {
-                if (result.redirect) {
-                    window.location.href = result.redirect; 
-                } else {
-                    window.location.href = '/result.html'; // Fallback
-                }
-            });
+    const fileInput = document.getElementById("audio-upload");
+    const file = fileInput.files[0];
+    if (!file) {
+      Swal.fire("กรุณาเลือกไฟล์ก่อน", "", "warning");
+      return;
+    }
 
-        } catch (error) {
-            console.error('Upload failed:', error);
-            Swal.close(); 
-            
-            Swal.fire({
-                title: 'ข้อผิดพลาด!',
-                text: 'การอัปโหลดและวิเคราะห์ล้มเหลว. กรุณาลองใหม่อีกครั้ง.',
-                icon: 'error',
-                confirmButtonText: 'ตกลง'
-            });
-            form.reset();
+    const formData = new FormData();
+    formData.append("file", file);
 
-        } finally {
-            body.style.cursor = 'default';
-        }
+    Swal.fire({
+      title: "กำลังประมวลผล...",
+      text: "กรุณารอสักครู่ ระบบกำลังวิเคราะห์ไฟล์เสียงของคุณ",
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      }
     });
+
+    try {
+      const response = await fetch("/uploadfile/", {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await response.json();
+
+      // ตรวจสอบว่ามี error หรือไม่
+      if (!response.ok || data.redirect === null || data.redirect === undefined) {
+        Swal.fire({
+          icon: "error",
+          title: "การวิเคราะห์ล้มเหลว",
+          text: data.api_result?.error
+            ? data.api_result.error
+            : "ไม่สามารถเชื่อมต่อกับ API วิเคราะห์ได้ กรุณาลองใหม่อีกครั้ง"
+        });
+        return;
+      }
+
+      Swal.fire({
+        icon: "success",
+        title: "สำเร็จ!",
+        text: data.message
+      }).then(() => {
+        window.location.href = data.redirect;
+      });
+
+    } catch (error) {
+      Swal.fire({
+        icon: "error",
+        title: "เกิดข้อผิดพลาด",
+        text: "ไม่สามารถติดต่อเซิร์ฟเวอร์ได้ กรุณาลองใหม่อีกครั้ง"
+      });
+      console.error("Error during upload:", error);
+    }
+  });
 });
