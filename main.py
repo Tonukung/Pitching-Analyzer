@@ -49,7 +49,7 @@ async def send_file_to_analysis_api(file_path: str, filename: str) -> dict:
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             with open(file_path, "rb") as f:
-                files = {"file": (filename, f, "audio/mpeg")}
+                files = {"file": (filename, f, "video/mp4")}
                 resp = await client.post(ANALYSIS_API_URL, files=files)
                 resp.raise_for_status()
                 data = resp.json()
