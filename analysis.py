@@ -1,20 +1,30 @@
-# !pip install faster-whisper librosa groq
-
-import os
-from dotenv import load_dotenv
-# from google.colab import userdata
-# os.environ["GROQ_API_KEY"] = userdata.get('GROQ_API_KEY')
-load_dotenv()
-
 import os
 import json
 import librosa
+import shutil
+from dotenv import load_dotenv
+from pydub import AudioSegment
 from groq import Groq
 from faster_whisper import WhisperModel
-from datetime import datetime # <-- 1. เพิ่ม import นี้
+from datetime import datetime
+from fastapi import FastAPI, Query, HTTPException, UploadFile, File, BackgroundTasks
+from starlette.responses import JSONResponse
 
-ASR_MODEL_NAME = "large-v3"
-ASR_COMPUTE_TYPE = "float16" # "float16" หรือ "int8" เพื่อความเร็ว
+load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+api_key = os.getenv("GROQ_API_KEY")
+print("🔑 Loaded key from env:", api_key[:10] if api_key else None)  # ตรวจว่ามาไหม
+
+if not api_key:
+    raise RuntimeError("❌ GROQ_API_KEY not found. Check .env location or syntax")
+
+client = Groq(api_key=api_key)
+print("📁 .env path:", os.path.join(os.path.dirname(__file__), ".env"))
+print("🔍 Current working dir:", os.getcwd())
+
+ASR_MODEL_NAME = "base"
+ASR_COMPUTE_TYPE = "int8" # "float16" หรือ "int8" เพื่อความเร็ว
 
 LLM_MODEL_NAME = "llama-3.3-70b-versatile"
 
@@ -30,17 +40,48 @@ THAI_FILLER_WORDS = [
     "ที่แบบ", "ใช่ไหม", "ใช่ป่ะ", "นะครับ", "นะคะ", "อะครับ", "อะค่ะ"
 ]
 
-def transcribe_audio(file_path):
+app = FastAPI()
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# --- Global Model Cache ---
+asr_model = None
+
+def get_asr_model():
+    """Loads the ASR model into memory if it's not already loaded."""
+    global asr_model
+    if asr_model is None:
+        print(f"กำลังโหลดโมเดล ASR ({ASR_MODEL_NAME}) เป็นครั้งแรก...")
+        asr_model = WhisperModel(ASR_MODEL_NAME, device="cpu", compute_type=ASR_COMPUTE_TYPE)
+    return asr_model
+
+def convert_to_wav(source_path: str) -> str:
+    """
+    Converts an audio/video file to a temporary WAV file for analysis.
+    Returns the path to the new WAV file.
+    """
+    print(f"Converting {source_path} to WAV format...")
+    try:
+        audio = AudioSegment.from_file(source_path)
+        # Create a temporary path for the WAV file
+        base, _ = os.path.splitext(source_path)
+        wav_path = f"{base}_temp.wav"
+        # Export as WAV
+        audio.export(wav_path, format="wav")
+        print(f"Successfully converted to {wav_path}")
+        return wav_path
+    except Exception as e:
+        print(f"Error during audio conversion: {e}")
+        # Re-raise the exception to be caught by the background task handler
+        raise
+
+def transcribe_audio(file_path, model: WhisperModel):
     """
     ถอดเสียงไฟล์ audio เป็น text โดยใช้ faster-whisper (Quantized)
-    และใช้ Prompt เพื่อบังคับให้ถอดคำฟุ่มเฟือย
     """
-    print(f"กำลังโหลดโมเดล ASR ({ASR_MODEL_NAME})...")
-
-    # TODO: ควบคุมการโหลดโมเดล (อาจจะโหลดครั้งเดียวนอกฟังก์ชัน)
-    model = WhisperModel(ASR_MODEL_NAME, device="cuda", compute_type=ASR_COMPUTE_TYPE)
-
     print(f"กำลังถอดเสียงไฟล์: {file_path}...")
+
     segments, info = model.transcribe(
         file_path,
         beam_size=5,
@@ -50,8 +91,12 @@ def transcribe_audio(file_path):
 
     full_transcript = "".join([seg.text for seg in segments])
 
-    # ใช้ librosa.get_duration(path=...) แทน filename=...
-    duration_seconds = librosa.get_duration(path=file_path)
+    # ใช้ librosa.get_duration เฉพาะกับไฟล์ .wav
+    try:
+        duration_seconds = librosa.get_duration(path=file_path)
+    except Exception as e:
+        print(f"Librosa failed to get duration for {file_path}: {e}")
+        duration_seconds = info.duration if hasattr(info, "duration") else 0
 
     print("--- Transcript (ผลดิบจาก Whisper) ---")
     print(full_transcript)
@@ -128,7 +173,6 @@ def analyze_presentation(transcript, duration_seconds):
     """
 
     try:
-        client = Groq()
         chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -156,51 +200,97 @@ def analyze_presentation(transcript, duration_seconds):
             "improvements": ["เกิดข้อผิดพลาดในการวิเคราะห์ LLM"]
         }
 
-def main():
-    # เปลี่ยนเป็นชื่อไฟล์ของคุณ
-    audio_file = "/content/EV Hack Video.mp4"
+def run_analysis_in_background(file_path: str, sanitized_filename: str):
+    """
+    ฟังก์ชันนี้จะถูกรันใน background เพื่อทำการถอดเสียงและวิเคราะห์
+    จากนั้นจะบันทึกผลลัพธ์เป็นไฟล์ .json
+    """
+    print(f"Background task started for: {sanitized_filename}")
+    model = get_asr_model()
+    wav_file_path = None
+    try:
+        # Convert the uploaded file to a processable WAV format first
+        wav_file_path = convert_to_wav(file_path)
 
-    if not os.path.exists(audio_file):
-        print(f"!!! [Error เเล้วพรี่] !!!")
-        print(f"ไม่เจอไฟล์ '{audio_file}' เช็คดีๆดิ๊")
-        return
+        transcript, duration = transcribe_audio(wav_file_path, model)
+        if transcript:
+            analysis_data = analyze_presentation(transcript, duration)
+            cache_path = os.path.join(UPLOAD_DIR, f"{sanitized_filename}.json")
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(analysis_data, f, ensure_ascii=False, indent=4)
+            print(f"Background task finished for: {sanitized_filename}")
 
-    transcript, duration = transcribe_audio(audio_file)
-
-    if not transcript:
-        print("ถอดเสียงบ่ได้")
-        return
-
-    analysis_data = analyze_presentation(transcript, duration)
-
-    if analysis_data:
-        print("\n\nผลการวิเคราะห์ (JSON Output ที่แก้ไขแล้ว)")
-
-        # 4. แก้ไข Output JSON ให้เป็นแบบ Flat (ไม่ซ้อน)
-        # โดยการรวม filename เข้ากับผลลัพธ์จาก analysis_data
-
-        # ใช้ os.path.basename เพื่อเอาแค่ชื่อไฟล์ ไม่เอา path เต็ม
-        final_json_output = {
-            "filename": os.path.basename(audio_file)
+    except Exception as e:
+        print(f"Error during background analysis for {sanitized_filename}: {e}")
+        # If an error occurs, create a JSON file with the error message
+        # This helps the frontend know that the process failed.
+        error_data = {
+            "status": "error",
+            "detail": str(e)
         }
+        cache_path = os.path.join(UPLOAD_DIR, f"{sanitized_filename}.json")
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(error_data, f, ensure_ascii=False, indent=4)
 
-        # .update() จะเอากุญแจทั้งหมดจาก analysis_data มารวมใน final_json_output
-        final_json_output.update(analysis_data)
+@app.post("/uploadfile/")
+async def create_upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """
+    รับไฟล์เสียง, บันทึก, ถอดเสียง, วิเคราะห์ และส่งผลลัพธ์ JSON กลับไป
+    """
+    # Sanitize filename to prevent directory traversal issues and spaces
+    sanitized_filename = os.path.basename(file.filename.replace(" ", "_"))
+    file_path = os.path.join(UPLOAD_DIR, sanitized_filename)
 
-        # ผลลัพธ์ที่ได้จะมีหน้าตาแบบนี้:
-        # {
-        #   "filename": "EV Hack Video.mp4",
-        #   "score": 85.0,
-        #   "analysis_date": "30 October 2025",
-        #   "strengths": [...],
-        #   "improvements": [...]
-        # }
+    # บันทึกไฟล์ที่อัปโหลด
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        print(f"File '{file.filename}' uploaded and saved as '{sanitized_filename}'")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
-        print(json.dumps(final_json_output, indent=2, ensure_ascii=False))
+    # สั่งให้รัน analysis ใน background
+    background_tasks.add_task(run_analysis_in_background, file_path, sanitized_filename)
 
-        with open("analysis_result.json", "w", encoding="utf-8") as f:
-            json.dump(final_json_output, f, indent=2, ensure_ascii=False)
-        print("\n(บันทึกผลลัพธ์ลงใน 'analysis_result.json' เรียบร้อย)")
+    # ตอบกลับทันทีว่าเริ่มงานแล้ว
+    return JSONResponse(
+        content={"message": "Analysis started in background", "filename": sanitized_filename}
+    )
 
-if __name__ == "__main__":
-    main()
+@app.get("/status/{filename}")
+async def get_analysis_status(filename: str):
+    """
+    ตรวจสอบสถานะของไฟล์วิเคราะห์
+    ถ้าเจอไฟล์ .json แสดงว่าเสร็จแล้ว, ถ้าไม่เจอคือยังประมวลผลอยู่
+    """
+    cache_file_path = os.path.join(UPLOAD_DIR, f"{filename}.json")
+
+    if os.path.exists(cache_file_path):
+        with open(cache_file_path, 'r', encoding='utf-8') as f:
+            analysis_data = json.load(f)
+        if analysis_data.get("status") == "error":
+            return JSONResponse(content=analysis_data)
+        else:
+            return JSONResponse(content={"status": "complete", "data": analysis_data})
+    else:
+        return JSONResponse(content={"status": "processing"})
+
+@app.get("/uploadfile/")
+async def get_analysis_by_filename(filename: str = Query(..., description="ชื่อไฟล์ที่ต้องการดึงผลการวิเคราะห์")):
+    """
+    ดึงผลการวิเคราะห์จากไฟล์ที่เคยอัปโหลดและวิเคราะห์ไปแล้ว
+    (ในตัวอย่างนี้จะทำการวิเคราะห์ใหม่ทุกครั้งที่เรียก)
+    """
+    cache_file_path = os.path.join(UPLOAD_DIR, f"{filename}.json")
+    audio_file_path = os.path.join(UPLOAD_DIR, filename)
+
+    if os.path.exists(cache_file_path):
+        print(f"Found cached analysis for '{filename}'. Reading from cache.")
+        with open(cache_file_path, 'r', encoding='utf-8') as f:
+            analysis_data = json.load(f)
+        return JSONResponse(content=analysis_data)
+
+    if not os.path.exists(audio_file_path):
+        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
+
+    raise HTTPException(status_code=425, detail="Analysis is still in progress. Please try again later.")

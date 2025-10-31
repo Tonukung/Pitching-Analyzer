@@ -1,6 +1,9 @@
-os
-shutil
 httpx
+librosa
 Optional
 datetime
 fastapi[standard]
+Groq
+openai-whisper
+faster-whisper
+pydub

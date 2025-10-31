@@ -1,5 +1,4 @@
 import os
-import shutil
 import httpx
 from typing import Optional
 from datetime import datetime
@@ -7,28 +6,24 @@ from fastapi import Request
 from fastapi import FastAPI, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 app = FastAPI()
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="file")
 
-ANALYSIS_API_URL = os.environ.get("ANALYSIS_API_URL", "http://localhost:8000/uploadfile/")
+ANALYSIS_API_BASE_URL = os.environ.get("ANALYSIS_API_BASE_URL", "http://localhost:3000")
+ANALYSIS_UPLOAD_URL = f"{ANALYSIS_API_BASE_URL}/uploadfile/"
+ANALYSIS_STATUS_URL = f"{ANALYSIS_API_BASE_URL}/status/"
 
 async def fetch_analysis_from_api(filename: str) -> dict:
-    """Call the analysis API with a filename query param and return JSON dict.
-
-    Returns a dict with an "error" key on failure.
-    """
+    """Call the analysis API with a filename query param and return JSON dict."""
     params = {"filename": filename}
-    timeout = httpx.Timeout(10.0, connect=5.0)
+    timeout = httpx.Timeout(30.0, connect=5.0) # ลด Timeout ลงเพราะเราแค่ดึงข้อมูลที่ cache ไว้
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            resp = await client.get(ANALYSIS_API_URL, params=params)
+            resp = await client.get(ANALYSIS_UPLOAD_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
             if not isinstance(data, dict):
@@ -39,29 +34,23 @@ async def fetch_analysis_from_api(filename: str) -> dict:
         except Exception as e:
             return {"error": f"Failed to call analysis API: {str(e)}"}
 
-
-async def send_file_to_analysis_api(file_path: str, filename: str) -> dict:
-    """Forward a saved file to the external analysis API as multipart/form-data.
-
-    Returns the parsed JSON from the API or a dict with an "error" key on failure.
-    """
-    timeout = httpx.Timeout(30.0, connect=10.0)
+# ✅ แก้ไขตรงนี้ ให้รับ UploadFile โดยตรง
+async def send_file_to_analysis_api(file: UploadFile) -> dict:
+    """Send uploaded file directly to external analysis API."""
+    timeout = httpx.Timeout(300.0, connect=5.0) # Increased timeout to 5 minutes
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            with open(file_path, "rb") as f:
-                files = {"file": (filename, f, "video/mp4")}
-                resp = await client.post(ANALYSIS_API_URL, files=files)
-                resp.raise_for_status()
-                data = resp.json()
-                if not isinstance(data, dict):
-                    return {"error": "Invalid response format from analysis API"}
-                return data
+            files = {"file": (file.filename, await file.read(), file.content_type)}
+            resp = await client.post(ANALYSIS_UPLOAD_URL, files=files)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict):
+                return {"error": "Invalid response format from analysis API"}
+            return data
         except httpx.HTTPError as e:
-            return {"error": f"HTTP error when sending file to analysis API: {str(e)}"}
-        except OSError as e:
-            return {"error": f"File I/O error when reading file to send: {str(e)}"}
+            return {"error": f"HTTP Error calling Analysis API: {str(e)}"}
         except Exception as e:
-            return {"error": f"Unexpected error when sending file to analysis API: {str(e)}"}
+            return {"error": f"Unexpected error: {str(e)}"}
 
 @app.get("/")
 async def index(request: Request):
@@ -71,14 +60,19 @@ async def index(request: Request):
         context={"request": request}
     )
 
+@app.get("/processing")
+async def processing(request: Request, filename: str):
+    """Displays a page that polls for the analysis result."""
+    return templates.TemplateResponse("processing.html", {
+        "request": request, "filename": filename
+    })
+
 @app.get("/result.html")
 async def result(request: Request, filename: Optional[str] = None):
-    """Result - now fetches analysis from external API and passes it into template"""
+    """Result - fetches analysis from external API and passes it into template"""
     display_filename = filename if filename else "pitching_file.mp3"
-
     api_result = await fetch_analysis_from_api(display_filename)
 
-    # default/fallback
     current_date = datetime.now().strftime("%d %B %Y")
     context_data = {
         "request": request,
@@ -107,39 +101,40 @@ async def result(request: Request, filename: Optional[str] = None):
 
 @app.post("/uploadfile/")
 async def create_upload_file(file: UploadFile = File(...)):
-    """Upload file"""
-    sanitized_filename = file.filename.replace(" ", "_")
-    file_path = os.path.join(UPLOAD_DIR, sanitized_filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    print(f"File '{file.filename}' Upload Complete as '{sanitized_filename}'")
-    api_result = await send_file_to_analysis_api(file_path, sanitized_filename)
+    """
+    Receives a file from the user and forwards it to the analysis API.
+    Then, redirects the user to the result page.
+    """
+    api_result = await send_file_to_analysis_api(file)
 
     print("Analysis API response:", api_result)
 
-    message = "Analysis failed"
-    redirect_url = None
-
     if "error" in api_result:
-        api_result.setdefault("error_detail", api_result.get("error"))
-        print("API returned error:", api_result["error"])
-    else:
-        api_filename = api_result.get("filename")
-        if api_filename:
-            if api_filename == sanitized_filename:
-                message = "Upload and analysis successful"
-                redirect_url = f"/result.html?filename={sanitized_filename}"
-            else:
-                message = "Filename mismatch"
-                api_result["error"] = f"Filename mismatch: expected '{sanitized_filename}', got '{api_filename}'"
-                print(api_result["error"])
-        else:
-            message = "Analysis failed"
-            api_result["error"] = api_result.get("error") or "Analysis API did not return filename"
-
+        return JSONResponse(status_code=500, content={"detail": api_result["error"]})
+    
+    api_filename = api_result.get("filename")
+    if not api_filename:
+        return JSONResponse(status_code=500, content={"detail": "Analysis API did not return a filename."})
+    
+    # Return the filename in a JSON response so the frontend can start polling.
     return JSONResponse(content={
-        "message": message,
-        "filename": file.filename,
-        "redirect": redirect_url,
-        "api_result": api_result
+        "message": "File uploaded successfully. Analysis has started.",
+        "filename": api_filename
     })
+
+@app.get("/check_status")
+async def check_status(filename: str):
+    """
+    Frontend polls this endpoint. This endpoint polls the analysis service.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            # Call the new /status/{filename} endpoint on the analysis service
+            resp = await client.get(f"{ANALYSIS_STATUS_URL}{filename}")
+            resp.raise_for_status()
+            data = resp.json()
+            return JSONResponse(content=data)
+        except httpx.HTTPStatusError as e:
+            return JSONResponse(status_code=e.response.status_code, content={"status": "error", "detail": f"Analysis service error: {e.response.text}"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "detail": str(e)})
